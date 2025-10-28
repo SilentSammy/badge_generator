@@ -3,6 +3,7 @@ from docx.shared import Inches
 import json
 import shutil
 import os
+import pandas as pd
 
 def replace_text_in_document(doc, replacements):
     """
@@ -42,6 +43,7 @@ def replace_text_in_document(doc, replacements):
 def replace_in_paragraph(paragraph, find_text, replace_text):
     """
     Replace text in a paragraph while preserving formatting by working with runs.
+    Handles text that spans multiple runs by reconstructing the paragraph.
     
     Args:
         paragraph: Word paragraph object
@@ -54,17 +56,55 @@ def replace_in_paragraph(paragraph, find_text, replace_text):
     if find_text not in paragraph.text:
         return 0
     
-    # Try to replace within individual runs first (preserves formatting)
+    # Try to replace within individual runs first (preserves formatting perfectly)
     for run in paragraph.runs:
         if find_text in run.text:
             run.text = run.text.replace(find_text, replace_text)
             return 1
     
-    # If not found in any single run, the text might span multiple runs
-    # In this case, we'll use the paragraph.text approach as fallback
-    # (This will lose formatting but at least the replacement works)
+    # If text spans multiple runs, we need to reconstruct while preserving formatting
     if find_text in paragraph.text:
-        paragraph.text = paragraph.text.replace(find_text, replace_text)
+        # Store all run information (text + formatting)
+        run_data = []
+        for run in paragraph.runs:
+            run_data.append({
+                'text': run.text,
+                'bold': run.bold,
+                'italic': run.italic,
+                'underline': run.underline,
+                'font_name': run.font.name if run.font.name else None,
+                'font_size': run.font.size,
+                'color': run.font.color.rgb if run.font.color.rgb else None
+            })
+        
+        # Get the full text and perform replacement
+        full_text = paragraph.text
+        new_text = full_text.replace(find_text, replace_text)
+        
+        # Clear the paragraph
+        paragraph.clear()
+        
+        # If the replacement is simple and fits in the first run's style, use that
+        if len(run_data) > 0:
+            new_run = paragraph.add_run(new_text)
+            # Apply the formatting from the first run
+            first_run = run_data[0]
+            if first_run['bold'] is not None:
+                new_run.bold = first_run['bold']
+            if first_run['italic'] is not None:
+                new_run.italic = first_run['italic']
+            if first_run['underline'] is not None:
+                new_run.underline = first_run['underline']
+            if first_run['font_name']:
+                new_run.font.name = first_run['font_name']
+            if first_run['font_size']:
+                new_run.font.size = first_run['font_size']
+            if first_run['color']:
+                new_run.font.color.rgb = first_run['color']
+        else:
+            # Fallback: just add the text
+            paragraph.add_run(new_text)
+        
         return 1
     
     return 0
@@ -153,12 +193,12 @@ def table_to_dicts(table, count_per_doc=5, image_column="Image", key_format="{}{
             # Generate keys for text columns (excluding image column)
             for column in table.columns:
                 if column != image_column and column != 'id':  # Skip image and id columns
-                    key = key_format.format(column.lower(), idx)
+                    key = key_format.format(column, idx)
                     text_dict[key] = str(row[column])
             
             # Generate key for image column
             if image_column in table.columns:
-                image_key = key_format.format(image_column.lower(), idx)
+                image_key = key_format.format(image_column, idx)
                 image_dict[image_key] = str(row[image_column])
         
         result_groups.append((text_dict, image_dict))
@@ -166,58 +206,71 @@ def table_to_dicts(table, count_per_doc=5, image_column="Image", key_format="{}{
     return result_groups
 
 def main():
-    """Load JSON data and perform text and image replacements"""
-    input_file = "Gafetes.docx"
-    output_file = "Gafetes_from_json.docx"
-    text_json_file = "dummy_data.json"
-    image_json_file = "dummy_images.json"
+    """Load CSV data and generate multiple Word documents"""
+    csv_file = "Atendees.csv"
+    template_file = "Gafetes.docx"
+    count_per_doc = 5  # Number of attendees per document
     
-    print("=== Simple Find & Replace from JSON ===")
-    print(f"Input: {input_file}")
-    print(f"Output: {output_file}")
-    print(f"Text data: {text_json_file}")
-    print(f"Image data: {image_json_file}")
+    print("=== CSV Batch Document Generation ===")
+    print(f"Reading: {csv_file}")
+    print(f"Template: {template_file}")
+    print(f"Attendees per document: {count_per_doc}")
     
-    # Load text replacement JSON data
+    # Load CSV data
     try:
-        with open(text_json_file, 'r', encoding='utf-8') as f:
-            text_replacements = json.load(f)
-        print(f"Loaded {len(text_replacements)} text replacements from JSON")
+        df = pd.read_csv(csv_file)
+        print(f"✅ Loaded {len(df)} attendees from CSV")
+        print(f"Columns: {list(df.columns)}")
+        print()
     except Exception as e:
-        print(f"❌ Error loading text JSON: {e}")
+        print(f"❌ Error loading CSV: {e}")
         return
     
-    # Load image replacement JSON data
-    try:
-        with open(image_json_file, 'r', encoding='utf-8') as f:
-            image_replacements = json.load(f)
-        print(f"Loaded {len(image_replacements)} image replacements from JSON")
-    except Exception as e:
-        print(f"❌ Error loading image JSON: {e}")
+    # Check if template exists
+    if not os.path.exists(template_file):
+        print(f"❌ Template file '{template_file}' not found")
         return
     
-    # Copy and open document
-    try:
-        shutil.copy2(input_file, output_file)
-        doc = Document(output_file)
-    except Exception as e:
-        print(f"❌ Error opening document: {e}")
-        return
+    # Split into document groups
+    groups = table_to_dicts(df, count_per_doc=count_per_doc)
+    print(f"📄 Generating {len(groups)} documents...")
+    print()
     
-    # Perform text replacements
-    print("\nPerforming text replacements...")
-    replace_text_in_document(doc, text_replacements)
+    # Generate documents for each group
+    for i, (text_dict, image_dict) in enumerate(groups):
+        output_file = f"Gafetes_{i:02d}.docx"
+        
+        print(f"🔄 Processing document {i+1}/{len(groups)}: {output_file}")
+        
+        try:
+            # Copy template to output file
+            shutil.copy2(template_file, output_file)
+            doc = Document(output_file)
+            
+            # Perform text replacements
+            print(f"   📝 Performing {len(text_dict)} text replacements...")
+            replace_text_in_document(doc, text_dict)
+            
+            # Perform image replacements (fix paths by removing leading slash)
+            fixed_image_dict = {}
+            for key, path in image_dict.items():
+                # Remove leading slash if present
+                fixed_path = path.lstrip('/')
+                fixed_image_dict[key] = fixed_path
+            
+            print(f"   🖼️  Performing {len(fixed_image_dict)} image replacements...")
+            replace_images_in_document(doc, fixed_image_dict)
+            
+            # Save document
+            doc.save(output_file)
+            print(f"   ✅ Saved: {output_file}")
+            
+        except Exception as e:
+            print(f"   ❌ Error processing {output_file}: {e}")
+        
+        print()
     
-    # Perform image replacements
-    print("\nPerforming image replacements...")
-    replace_images_in_document(doc, image_replacements)
-    
-    # Save document
-    try:
-        doc.save(output_file)
-        print(f"\n🎉 Document saved as: {output_file}")
-    except Exception as e:
-        print(f"❌ Error saving document: {e}")
+    print(f"🎉 Batch processing complete! Generated {len(groups)} documents.")
 
 if __name__ == "__main__":
     main()
