@@ -4,6 +4,7 @@ import json
 import shutil
 import os
 import pandas as pd
+from docx2pdf import convert
 
 def replace_text_in_document(doc, replacements):
     """
@@ -109,7 +110,7 @@ def replace_in_paragraph(paragraph, find_text, replace_text):
     
     return 0
 
-def replace_images_in_document(doc, image_replacements):
+def replace_images_in_document(doc, image_replacements, width_inches=0.8):
     """
     Replace text placeholders with images in a Word document.
     
@@ -128,7 +129,7 @@ def replace_images_in_document(doc, image_replacements):
         # Replace in all paragraphs
         for paragraph in doc.paragraphs:
             if placeholder in paragraph.text:
-                replaced_count += replace_text_with_image_in_paragraph(paragraph, placeholder, image_path)
+                replaced_count += replace_text_with_image_in_paragraph(paragraph, placeholder, image_path, width_inches=width_inches)
         
         # Replace in all table cells  
         for table in doc.tables:
@@ -136,7 +137,7 @@ def replace_images_in_document(doc, image_replacements):
                 for cell in row.cells:
                     for paragraph in cell.paragraphs:
                         if placeholder in paragraph.text:
-                            replaced_count += replace_text_with_image_in_paragraph(paragraph, placeholder, image_path)
+                            replaced_count += replace_text_with_image_in_paragraph(paragraph, placeholder, image_path, width_inches=width_inches)
         
         if replaced_count > 0:
             print(f"✅ Replaced '{placeholder}' with image in {replaced_count} location(s)")
@@ -166,7 +167,7 @@ def replace_text_with_image_in_paragraph(paragraph, placeholder, image_path, wid
     
     return 1
 
-def table_to_dicts(table, count_per_doc=5, image_column="Image", key_format="{}{:02d}"):
+def table_to_dicts(table, count_per_doc=30, image_column="Image", key_format="{}{:02d}"):
     """
     Split a DataFrame into groups and generate text/image replacement dictionaries.
     
@@ -206,15 +207,50 @@ def table_to_dicts(table, count_per_doc=5, image_column="Image", key_format="{}{
     return result_groups
 
 def main():
-    """Load CSV data and generate multiple Word documents"""
-    csv_file = "Atendees.csv"
-    template_file = "Gafetes.docx"
-    count_per_doc = 5  # Number of attendees per document
+    """Load CSV data and generate multiple Word documents using profiles"""
+    profiles = [
+        {
+            "name": "Standard Badges",
+            "csv_file": "Atendees.csv",
+            "template_file": "Gafetes.docx",
+            "count_per_doc": 30,
+            "output_prefix": "Gafetes/Gafetes",
+            "image_column": "Image",
+            "key_format": "{}{:02d}",
+            "image_width_inches": 0.8
+        },
+        # Add more profiles here as needed
+        {
+            "name": "Entry Passes",
+            "csv_file": "Pases.csv",
+            "template_file": "Pases.docx",
+            "count_per_doc": 12,
+            "output_prefix": "Pases/Pases",
+            "image_column": "Image",
+            "key_format": "{}{:02d}",
+            "image_width_inches": 1.75
+        },
+    ]
     
-    print("=== CSV Batch Document Generation ===")
+    # Select which profile to use (change index to switch profiles)
+    profile = profiles[1]
+    
+    # Extract profile settings
+    csv_file = profile["csv_file"]
+    template_file = profile["template_file"]
+    count_per_doc = profile["count_per_doc"]
+    output_prefix = profile.get("output_prefix", "Document")
+    profile_name = profile.get("name", "Unnamed Profile")
+    image_column = profile.get("image_column", "Image")
+    key_format = profile.get("key_format", "{}{:02d}")
+    
+    print(f"=== {profile_name} ===")
     print(f"Reading: {csv_file}")
     print(f"Template: {template_file}")
     print(f"Attendees per document: {count_per_doc}")
+    print(f"Output prefix: {output_prefix}")
+    print(f"Image column: {image_column}")
+    print(f"Key format: {key_format}")
     
     # Load CSV data
     try:
@@ -232,13 +268,13 @@ def main():
         return
     
     # Split into document groups
-    groups = table_to_dicts(df, count_per_doc=count_per_doc)
+    groups = table_to_dicts(df, count_per_doc=count_per_doc, image_column=image_column, key_format=key_format)
     print(f"📄 Generating {len(groups)} documents...")
     print()
     
     # Generate documents for each group
     for i, (text_dict, image_dict) in enumerate(groups):
-        output_file = f"Gafetes_{i:02d}.docx"
+        output_file = f"{output_prefix}_{i:02d}.docx"
         
         print(f"🔄 Processing document {i+1}/{len(groups)}: {output_file}")
         
@@ -259,18 +295,27 @@ def main():
                 fixed_image_dict[key] = fixed_path
             
             print(f"   🖼️  Performing {len(fixed_image_dict)} image replacements...")
-            replace_images_in_document(doc, fixed_image_dict)
+            replace_images_in_document(doc, fixed_image_dict, width_inches=profile.get("image_width_inches", 0.8))
             
             # Save document
             doc.save(output_file)
             print(f"   ✅ Saved: {output_file}")
+            
+            # Convert to PDF
+            pdf_file = f"{output_prefix}_{i:02d}.pdf"
+            print(f"   📄 Converting to PDF: {pdf_file}")
+            try:
+                convert(output_file, pdf_file)
+                print(f"   ✅ PDF saved: {pdf_file}")
+            except Exception as pdf_error:
+                print(f"   ⚠️  PDF conversion failed: {pdf_error}")
             
         except Exception as e:
             print(f"   ❌ Error processing {output_file}: {e}")
         
         print()
     
-    print(f"🎉 Batch processing complete! Generated {len(groups)} documents.")
+    print(f"🎉 Profile '{profile_name}' complete! Generated {len(groups)} documents with PDF exports.")
 
 if __name__ == "__main__":
     main()

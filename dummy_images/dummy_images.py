@@ -2,7 +2,7 @@ import cv2
 import numpy as np
 import os
 
-def create_dummy_images(output_dir=".", count=30, size=512):
+def create_dummy_images(output_dir="./dummy_images", count=90, size=512):
     """
     Create dummy images with red outline and centered number text.
     
@@ -55,4 +55,4 @@ def create_dummy_images(output_dir=".", count=30, size=512):
 
 if __name__ == "__main__":
     # Create 30 dummy images in the current directory
-    create_dummy_images(output_dir=".", count=30, size=512)
+    create_dummy_images()
