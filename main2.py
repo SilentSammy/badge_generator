@@ -233,7 +233,7 @@ def main():
     ]
     
     # Select which profile to use (change index to switch profiles)
-    profile = profiles[1]
+    profile = profiles[0]
     
     # Extract profile settings
     csv_file = profile["csv_file"]
